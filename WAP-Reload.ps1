@@ -221,11 +221,11 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
         Start-Sleep -Milliseconds 250           #--[ Pause ]-- 
         $Read = $Stream.Read()                  #--[ Clear the buffer ]--
         While ($Read -notlike "*#"){
-            $Stream.WriteLine("enable")                 #--[ Send the enable command ]--
-            Start-Sleep -Milliseconds 250           #--[ Pause ]--]
-            $Read =  $Stream.Read() #| Out-Null               #--[ Clear the buffer ]--      
-            $Stream.WriteLine($Password)            #--[ Send the password ]--
-            Start-Sleep -Milliseconds 250           #--[ Pause ]--    
+            $Stream.WriteLine("enable")         #--[ Send the enable command ]--
+            Start-Sleep -Milliseconds 250       #--[ Pause ]--]
+            $Read = $Stream.Read()              #--[ Clear the buffer ]--      
+            $Stream.WriteLine($Password)        #--[ Send the password ]--
+            Start-Sleep -Milliseconds 250       #--[ Pause ]--    
         }
         $Stream.WriteLine("terminal length 0")  #--[ Set the terminal length ]--
         Start-Sleep -Milliseconds 250           #--[ Pause ]-- 
@@ -355,10 +355,10 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
             $StopWatch.Stop()
             If ($GoodPing){
                 $Tracker = $Tracker+";GoodPing"
-                StatusMsg "WAP Status                : Verified back online..." "Green" $ExtOption
+                StatusMsg "WAP Status                    : Verified back online..." "Green" $ExtOption
             }Else{
                 $Tracker = $Tracker+";BadPing"
-                StatusMsg "WAP Status                : Not responding to ping.  Please check manually..." "Red" $ExtOption
+                StatusMsg "WAP Status                    : Not responding to ping.  Please check manually..." "Red" $ExtOption
             }
 
         }Else{
@@ -366,9 +366,9 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
         }        
         Get-SSHSession | Select-Object SessionId | Remove-SSHSession | Out-Null  #--[ Remove the open session ]-- 
         If ($Session.Connected) {
-            StatusMsg "SSH session status        : Disconnect FAILED" "Red" $ExtOption
+            StatusMsg "SSH session status            : Disconnect FAILED" "Red" $ExtOption
         }else{
-            StatusMsg "SSH session status        : Disconnected" "Cyan" $ExtOption
+            StatusMsg "SSH session status            : Disconnected" "Cyan" $ExtOption
         }
     }Catch{
         StatusMsg "An error has occurred during the SSH session..." "Red" $ExtOption
@@ -418,9 +418,6 @@ StatusMsg ("Reboot window stop time      : "+$ExtOption.WindowEnd+":00 Hrs") "Cy
 $TargetList = Get-content -Path $PSScriptRoot\IPlist.txt
 $TargetList = $Targetlist | Sort-Object { Get-Random }
 StatusMsg "- Randomizing target IP list..." "Yellow" $ExtOption
-
-#$TargetList = "10.40.10.74"
-#$TargetList = "10.40.70.104"
 
 ForEach ($IP in $TargetList){
     $Now = Get-Date -Format MM-dd-yyyy 
