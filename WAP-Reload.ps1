@@ -60,9 +60,11 @@
    Version History : v1.00 - 10-01-26 - Original 
     Change History : v1.10 - 10-05-26 - Updated internal documentation.  Added model detection.  Edited SSH
                    :                    routine to compensate for stubborn APs .
+                   : v1.20 - 11-02-26 - Moved log file names to option file.  Corrected an issue with reboot
+                   :                    validation check messages.
                    : v2.00 - 00-00-00 - 
                    : #>
-                   $ScriptVer = "1.10"    <#--[ Current version # used in script ]--
+                   $ScriptVer = "1.20"    <#--[ Current version # used in script ]--
 ==============================================================================#>
 #Requires -version 5
 Clear-host
@@ -89,10 +91,10 @@ Function StatusMsg ($Msg, $Color, $ExtOption, $Tracking){
     }
     If (!($ExtOption.NoLogging)){
         If ($ExtOption.Debug){
-            Add-Content -Path "$PSScriptRoot\Debug.log" -Value $Msg
+            Add-Content -Path $ExtOption.Debuglog -Value $Msg
         }
         If ($Null -ne $Tracking){
-            Add-Content -Path "$PSScriptRoot\Tracking.log" -Value $Tracking
+            Add-Content -Path $ExtOption.TrackingLog -Value $Tracking
             Return
         }
     }    
@@ -200,7 +202,8 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
     $Response = ""
     [int]$Days = 0
     $Password = $ExtOption.Credential.GetNetworkCredential().Password
-    Try{        
+    Try{  
+        #--[ SSH Session ]---------------------------------------------------      
         Get-SSHSession | Select-Object SessionId | Remove-SSHSession | Out-Null  #--[ Remove any existing sessions ]--
         $Session = New-SSHSession -ComputerName $TargetIP -AcceptKey -Credential $ExtOption.Credential   #--[ Create the session ]--
         If ($Session.Connected) {
@@ -223,7 +226,7 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
         While ($Read -notlike "*#"){
             $Stream.WriteLine("enable")         #--[ Send the enable command ]--
             Start-Sleep -Milliseconds 250       #--[ Pause ]--]
-            $Read = $Stream.Read()              #--[ Clear the buffer ]--      
+            $Read =  $Stream.Read()             #--[ Clear the buffer ]--      
             $Stream.WriteLine($Password)        #--[ Send the password ]--
             Start-Sleep -Milliseconds 250       #--[ Pause ]--    
         }
@@ -239,9 +242,14 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
                 $Response += $Read
             }
         }
-
+    }Catch{
+        StatusMsg "An error has occurred during the SSH session..." "Red" $ExtOption
+        StatusMsg $_.Exception.Message "Red" $ExtOption
+    }
+    #--[ Uptime Detection ]-----------------------------------------------
+    Try{
         If (($ExtOption.Debug) -and (!($ExtOption.NoLogging))){
-            Add-Content -Path "$PSScriptRoot\Debug.log" -Value $Response
+            Add-Content -Path $ExtOption.DebugLog -Value $Response
             Write-host $Response -ForegroundColor Blue
         }
 
@@ -281,44 +289,54 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
         StatusMsg ("Detected Hostname            : "+$Hostname) "Cyan" $ExtOption
         StatusMsg ("Detected Model               : "+$Model) "Cyan" $ExtOption
         StatusMsg ("Detected Uptime              : "+$Uptime) "Cyan" $ExtOption
-        StatusMsg ("Days since last reboot       : "+$Days) "Cyan" $ExtOption    
+        StatusMsg ("Days since last reboot       : "+$Days) "Cyan" $ExtOption   
+        StatusMsg ("Allowed days between reboots : "+$ExtOption.DaysBetween) "Cyan" $ExtOption 
         If ($HostName -eq ""){
             StatusMsg "-- Failure to read uptime --" "Red" $ExtOption
             $Tracker = $Tracker+";- Failure to read uptime -"
-            Add-Content -Path "$PSScriptRoot\Failure.log" -Value $Tracker
+            Add-Content -Path $ExtOption.FailureLog -Value $Tracker
             Return
         }
         $Tracker = $Tracker+";$HostName;$Model;$UpTime"
         $Stream.Read() | Out-Null          #--[ Clear the buffer ]--  
         Start-Sleep -Milliseconds 250      #--[ Pause ]-- 
         $RebootOK = $True
-
-        #--[ Validation Checks ]--
-        StatusMsg ("Allowed days between reboots : "+$ExtOption.DaysBetween) "Cyan" $ExtOption
-        StatusMsg "Performing validation checks :" "Cyan" $ExtOption
-        If ($Days -lt $ExtOption.DaysBetween){  
-            StatusMsg "- This WAP has been online less than 30 days.   No reboot will occur..." "Green" $ExtOption
-            $Tracker = $Tracker+";<30"
+    }Catch{
+        StatusMsg "An error has occurred during the uptime detection..." "Red" $ExtOption
+        StatusMsg $_.Exception.Message "Red" $ExtOption
+    }
+    Try{
+        #--[ Validation Checks ]---------------------------------------------
+        $RebootOK = $False  #--[ Default for safety ]--
+        StatusMsg "Performing validation checks :" "Green" $ExtOption
+        If ($ExtOption.ReportOnly){
+                StatusMsg "- Report Only Mode is active...      -- No reboot will occur --" "Yellow" $ExtOption
+                $RebootOK = $False
+        }ElseIf ($Days -lt $ExtOption.DaysBetween){ 
+            $Msg = "- This WAP has been online less than "+[Int]$ExtOption.DaysBetween+" days.   No reboot will occur..."            
+            StatusMsg $Msg "Green" $ExtOption
+            $Tracker = $Tracker+";<"+[Int]$ExtOption.DaysBetween
             $RebootOK = $False
-        }Else{
-            StatusMsg "- This WAP has been online for over 30 days.    Reboot OK to proceed..." "Yellow" $ExtOption
-            $Tracker = $Tracker+";>30"
-            $RebootOK = $True
+        }Else{   
+            $Msg = "- This WAP has been online for over "+[Int]$ExtOption.DaysBetween+" days.    Reboot OK to proceed..."
+            StatusMsg $Msg "Yellow" $ExtOption
+            $Tracker = $Tracker+";>"+$ExtOption.DaysBetween
             If (!(RebootWindow $ExtOption)){       
                 StatusMsg "- Currently outside of the safe reboot window.  No reboot will occur..." "Green" $ExtOption
                 $RebootOK = $False
             }Else{
-                StatusMsg "- Safe reboot window is currently OPEN.        Reboot OK to proceed..." "Yellow" $ExtOption
-            $RebootOK = $True
+                StatusMsg "- Safe reboot window is currently OPEN.         Reboot OK to proceed..." "Yellow" $ExtOption
+                $RebootOK = $True
             }
-        }
-       
-        If ($ExtOption.ReportOnly){
-            StatusMsg "- Report Only Mode is active.                   No reboot will occur..." "Cyan" $ExtOption
-            $RebootOK = $False
-        }
-
-        #--[ Perform the reboot ]--       
+        }   
+    }Catch{
+        StatusMsg "An error has occurred during validation checks..." "Red" $ExtOption
+        StatusMsg "Reboot aborted..." "Red" $ExtOption
+        StatusMsg $_.Exception.Message "Red" $ExtOption
+        $RebootOK = $False
+    }
+    Try{
+        #--[ Perform the reboot ]----------------------------------------------------------------       
         If (($RebootOK) -or ($ForceAllReboot)){
             $Stream.WriteLine("reload")        #--[ Send the reload command ]--
             Start-Sleep -Milliseconds 250      #--[ Pause ]-- 
@@ -355,10 +373,10 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
             $StopWatch.Stop()
             If ($GoodPing){
                 $Tracker = $Tracker+";GoodPing"
-                StatusMsg "WAP Status                    : Verified back online..." "Green" $ExtOption
+                StatusMsg "WAP Status                   : Verified back online..." "Green" $ExtOption
             }Else{
                 $Tracker = $Tracker+";BadPing"
-                StatusMsg "WAP Status                    : Not responding to ping.  Please check manually..." "Red" $ExtOption
+                StatusMsg "WAP Status                   : Not responding to ping.  Please check manually..." "Red" $ExtOption
             }
 
         }Else{
@@ -366,12 +384,12 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
         }        
         Get-SSHSession | Select-Object SessionId | Remove-SSHSession | Out-Null  #--[ Remove the open session ]-- 
         If ($Session.Connected) {
-            StatusMsg "SSH session status            : Disconnect FAILED" "Red" $ExtOption
+            StatusMsg "SSH session status           : Disconnect FAILED" "Red" $ExtOption            
         }else{
-            StatusMsg "SSH session status            : Disconnected" "Cyan" $ExtOption
+            StatusMsg "SSH session status           : Disconnected" "Cyan" $ExtOption
         }
     }Catch{
-        StatusMsg "An error has occurred during the SSH session..." "Red" $ExtOption
+        StatusMsg "An error has occurred during the reboot SSH session..." "Red" $ExtOption
         StatusMsg $_.Exception.Message "Red" $ExtOption
     }
     StatusMsg "" "Black" $ExtOption $Tracker  #--[ This ONE status adds $Tracker to the tracker log ]--
@@ -380,6 +398,8 @@ Function GetSSH ($TargetIP,$Tracker,$ExtOption){
 
 #==[ End of Functions ]====================================================
 
+$Now = Get-Date -Format MM-dd-yyyy_HHmmss 
+$Today = Get-Date -Format MM-dd-yyyy  
 #--[ Load external XML options file ]------------------------------------------------
 $ConfigFile = $PSScriptRoot+"\"+($MyInvocation.MyCommand.Name.Split("_")[0]).Split(".")[0]+".xml"
 $ExtOption = New-Object -TypeName psobject #--[ Object to hold runtime options ]--
@@ -394,6 +414,9 @@ If ($Debug){$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "Debug
 If ($Console){$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "ConsoleState" -Value $True}
 If ($ReportOnly){$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "ReportOnly" -Value $True}
 If ($NoLogging){$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "NoLogging" -Value $True}
+$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "DebugLog" -Value ($PSScriptRoot+"\"+$Today+"_"+"Debug.log")
+$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "TrackingLog" -Value ($PSScriptRoot+"\"+$Today+"_"+"Tracking.log")
+$ExtOption | Add-Member -Force -MemberType NoteProperty -Name "FailureLog" -Value ($PSScriptRoot+"\"+$Today+"_"+"Failure.log")
 
 #--[ Process Logon Credentials ]-------------------------------
 $UID = "admin"
@@ -420,22 +443,26 @@ $TargetList = $Targetlist | Sort-Object { Get-Random }
 StatusMsg "- Randomizing target IP list..." "Yellow" $ExtOption
 
 ForEach ($IP in $TargetList){
-    $Now = Get-Date -Format MM-dd-yyyy 
-
-    StatusMsg "--------------------------------------------" "Magenta" $ExtOption
-    StatusMsg ("Target IP Address            : "+$IP) "Cyan" $ExtOption
-    If (Test-Connection -ComputerName $IP -Count 1 -Quiet) {
-        StatusMsg "Ping check                   : Successful" "Green" $ExtOption
-        If (!($ExtOption.NoLogging)){
-            $Tracker = "$Now;$IP"
-        }
-        GetSSH $IP $Tracker $ExtOption
+    If ($IP -eq ""){
+        StatusMsg "--------------------------------------------" "Magenta" $ExtOption
+        StatusMsg "Found a blank line in the list.  Skipping..." "Magenta" $ExtOption
     }Else{
-        StatusMsg "Ping check                   : Failed" "Red" $ExtOption
-        If (!($ExtOption.NoLogging)){
-            $Tracker = $Tracker+";- Failure to respond to ping -"
-        }        
-        Add-Content -Path "$PSScriptRoot\Failure.log" -Value $Tracker
+        $Now = Get-Date -Format MM-dd-yyyy 
+        StatusMsg "--------------------------------------------" "Magenta" $ExtOption
+        StatusMsg ("Target IP Address            : "+$IP) "Yellow" $ExtOption
+        If (Test-Connection -ComputerName $IP -Count 1 -Quiet) {
+            StatusMsg "Ping check                   : Successful" "Green" $ExtOption
+            If (!($ExtOption.NoLogging)){
+                $Tracker = "$Now;$IP"
+            }
+            GetSSH $IP $Tracker $ExtOption
+        }Else{
+            StatusMsg "Ping check                   : Failed" "Red" $ExtOption
+            If (!($ExtOption.NoLogging)){
+                $Tracker = $Tracker+";- Failure to respond to ping -"
+            }        
+            Add-Content -Path $ExtOption.FailureLog -Value $Tracker
+        }
     }
 }
 
