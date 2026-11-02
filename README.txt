@@ -62,6 +62,9 @@ Uses Posh-SSH to connect to, inspect, and reboot Cisco wireless APs if over a th
    Version History : v1.00 - 10-01-26 - Original 
     Change History : v1.10 - 10-05-26 - Updated internal documentation.  Added model detection.  Edited SSH
                    :                    routine to compensate for stubborn APs .
+                   : v1.20 - 11-02-26 - Moved log file names to option file.  Corrected an issue with reboot
+                   :                    validation check messages.
                    : v2.00 - 00-00-00 - 
                    : #>
+
 
